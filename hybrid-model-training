@@ -1,0 +1,69 @@
+clc;
+clear all;
+close all;
+
+covidParentFolder = ’Add path’;
+normalParentFolder = ’Add path’;
+covidSubfolders = dir(fullfile(covidParentFolder, ’*’));
+covidSubfolders = covidSubfolders([covidSubfolders.isdir] & ...
+~ismember({covidSubfolders.name}, {’.’, ’..’}));
+normalSubfolders = dir(fullfile(normalParentFolder, ’*’));
+normalSubfolders = normalSubfolders([normalSubfolders.isdir] & ...
+~ismember({normalSubfolders.name}, {’.’, ’..’}));
+
+% importing mobilenet for feature extraction
+
+net = mobilenetv2;
+layers = freezeConvLayers(net.Layers);
+% extracting the features for
+[features, labels] = loadAndExtractFeatures(covidSubfolders, ...
+covidParentFolder, net, 1);
+[features, labels] = loadAndExtractFeatures(normalSubfolders, ...
+normalParentFolder, net, 0);
+numTotal = size(features, 1);
+cv = cvpartition(numTotal, ’HoldOut’, 0.2);
+idx = cv.test;
+X_train = features(~idx, :);
+y_train = labels(~idx);
+X_test = features(idx, :);
+y_test = labels(idx);
+% training the model
+tree = fitcensemble(X_train, y_train, ’Method’, ’AdaBoostM1’, ...
+’NumLearningCycles’, 100);
+
+save(’trained_model_with_GradientBoosting.mat’, ’tree’);
+
+% predicting given data
+y_pred = predict(tree, X_test);
+accuracy = sum(y_pred == y_test) / numel(y_test);
+
+% confusion matrix and calc of metrics
+confMat = confusionmat(y_test, y_pred);
+recall = confMat(1, 1) / (confMat(1, 1) + confMat(1, 2));
+precision = confMat(1, 1) / (confMat(1, 1) + confMat(2, 1));
+f1score = 2 * (precision * recall) / (precision + recall);
+fprintf(’Accuracy: %.2f%%\n’, accuracy * 100);
+fprintf(’Recall: %.2f\n’, recall);
+fprintf(’Precision: %.2f\n’, precision);
+fprintf(’F1-score: %.2f\n’, f1score);
+
+function [features, labels] = loadAndExtractFeatures(subfolders, ...
+parentFolder, net, label)
+features = [];
+labels = [];
+count = 0;
+for folderIdx = 1:length(subfolders)
+  currentSubfolder = subfolders(folderIdx);
+  currentFolder = fullfile(parentFolder, currentSubfolder.name);
+  files = dir(fullfile(currentFolder, ’*.tif’));
+  count = count + length(files);
+  for i = 1:length(files)
+    img = imread(fullfile(currentFolder, files(i).name));
+    img = imresize(img, [224 224]);
+    img = cat(3, img, img, img);
+    features = [features; extractFeaturesMobileNetV2(net, img)];
+    labels = [labels; label];
+    end
+  end
+  fprintf(’Total images loaded: %d\n’, count);
+end
