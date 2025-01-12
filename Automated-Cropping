@@ -1,5 +1,3 @@
-# Automated Cropping
-
 %% Automated cropping using edge detection, dilation, filling and boundary box for detection
 % savePath2;
 
