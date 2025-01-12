@@ -1,0 +1,169 @@
+clc;
+clear all;
+close all;
+
+covidPneumonia='C:\Users\gurpu\Desktop\Capstone\dataset ct\input dataset\non binary images train\COVID pneumonia';
+imdsCP=imageDatastore(covidPneumonia,"FileExtensions",'.png',"IncludeSubfolders",true);
+
+covidPositive1='C:\Users\gurpu\Desktop\Capstone\dataset ct\input dataset\non binary images train\COVID infection';
+imdsCI=imageDatastore(covidPositive1,"FileExtensions",'.png',"IncludeSubfolders",true);
+
+normal='C:\Users\gurpu\Desktop\Capstone\dataset ct\input dataset\non binary images train\Normal';
+imdsN=imageDatastore(normal,"FileExtensions",'.png',"IncludeSubfolders",true);
+
+n1=numel(imdsCP.Files);
+n2=numel(imdsN.Files);
+n3=numel(imdsCI.Files);
+n=n1+n2+n3;
+
+% extracting the labels
+label=[];
+label=num2str(label);
+
+% define data augmentation parameters
+augmenter = imageDataAugmenter( ...
+    'FillValue',128,...
+    'RandRotation',[-45 45], ...        % Random rotation between -45 and 45 degrees
+    'RandXReflection',true, ...         % Random horizontal flipping set to true
+    'RandYReflection',true, ...         % Random vertical flipping set to true
+    'RandXTranslation',[-20 20], ...    % Random horizontal translation
+    'RandYTranslation',[-20 20], ...    % Random vertical translation
+    'RandXShear',[0 45], ...            % Random horizontal shear
+    'RandYShear',[0 45], ...            % Random vertical shear
+    'RandXScale',[1.0 2.5], ...         % Random scaling between 1.0 and 2.5
+    'RandYScale',[1.0 2.5]);            % Random scaling between 1.0 and 2.5
+
+% apply data augmentation to the image datastores
+augmentedImdsCP = augmentedImageDatastore([310 420 1], imdsCP, 'DataAugmentation', augmenter);
+augmentedImdsN = augmentedImageDatastore([310 420 1], imdsN, 'DataAugmentation', augmenter);
+augmentedImdsCI = augmentedImageDatastore([310 420 1], imdsCI, 'DataAugmentation', augmenter);
+
+% combine the augmented image datastores
+imds = imageDatastore(cat(1, augmentedImdsCP.Files, augmentedImdsN.Files, augmentedImdsCI.Files));
+% Combine the labels separately
+labels = cat(1, repmat({'CP'}, numel(augmentedImdsCP.Files), 1), ...
+                repmat({'N'}, numel(augmentedImdsN.Files), 1), ...
+                repmat({'CI'}, numel(augmentedImdsCI.Files), 1));
+
+% labels of augmented datastores
+imds.Labels = categorical(labels);
+
+
+rng(0); % setting the seed to 0
+% shuffle the datastores
+imds=shuffle(imds);
+
+% importing resnet50 to the workspace
+[net,classNames] = imagePretrainedNetwork("resnet50");
+%% 2
+% converting net to lgraph for modification
+lgraph=layerGraph(net);
+
+figure;
+plot(lgraph)
+disp('check 1 -OK');
+
+net1=net;
+%% 3
+% initializing the initial layers
+beginingLayers=[imageInputLayer([310 420 3],'Name','inputLayer','Normalization','none')
+    resize2dLayer('OutputSize',[224 224],'Name','rs1')];
+
+% initializing the end layers
+endLayers=[
+    fullyConnectedLayer(128,'Name','fc1_1')
+    fullyConnectedLayer(64,'Name','fc1_2')
+    fullyConnectedLayer(32,'Name','fc1_3')
+    fullyConnectedLayer(16,'Name','fc1_4')
+    fullyConnectedLayer(3,'Name','fc1_5')
+    softmaxLayer('Name','sL1')
+    classificationLayer('Name','cL1')];
+
+% remove redundant layers
+lgraph=removeLayers(lgraph,'input_1'); 
+lgraph=removeLayers(lgraph,'fc1000_softmax');
+
+% add and connect the respective layers
+lgraph=addLayers(lgraph,beginingLayers);
+lgraph=connectLayers(lgraph,'rs1','conv1/in');
+
+lgraph=addLayers(lgraph,endLayers);
+lgraph=connectLayers(lgraph,'fc1000','fc1_1/in');
+
+figure;
+plot(lgraph);
+%% 4
+% converting lgraph to layers and saving the connections
+layers = lgraph.Layers;
+connections = lgraph.Connections;
+%% 5
+% freezing the layers for the 1st training iteration
+layers(1:152) = freezeWeights(layers(1:152));
+layers(163:183)=freezeWeights(layers(163:183));
+
+% change the L2 regularization for tackling overfitting
+layers(152:162)=changeL2Regularization(layers(152:162),0.00001,0.0001);
+
+% assemble the model using the connections again
+lgraph = createLgraphUsingConnections(layers,connections);
+disp('check 2 -OK');
+
+%% 6
+% training the network
+options = trainingOptions('adam', ...
+    'InitialLearnRate',0.00001, ...
+    'MaxEpochs',16, ...
+    'MiniBatchSize',256, ...
+    'LearnRateSchedule','piecewise',...
+    'LearnRateDropFactor',0.1,...
+    'LearnRateDropPeriod',3,...
+    'Shuffle','every-epoch', ...
+    'Verbose',false, ...
+    'ExecutionEnvironment', 'gpu', ...
+    'Plots','training-progress');
+
+net=trainNetwork(imds,lgraph,options);
+%%
+
+resnet50_1=net;
+save('resnet50_1.mat', '-v7.3');
+
+
+function layers = freezeWeights(layers)
+    for ii = 1:size(layers,1)
+        props = properties(layers(ii));
+        for p = 1:numel(props)
+            propName = props{p};
+            if ~isempty(regexp(propName, 'LearnRateFactor$', 'once'))
+                layers(ii).(propName) = 0;
+            end
+        end
+    end
+end
+
+
+function layers = changeL2Regularization(layers,L2Val,L2Bias)
+    for ii = 1:size(layers,1)
+        props = properties(layers(ii));
+        for p = 1:numel(props)
+            propName = props{p};
+            if ~isempty(regexp(propName, 'WeightL2Factor$', 'once'))
+                layers(ii).(propName) = L2Val;
+            end
+            if ~isempty(regexp(propName, 'BiasL2Factor$', 'once'))
+                layers(ii).(propName) = L2Bias;
+            end
+        end
+    end
+end
+
+function lgraph = createLgraphUsingConnections(layers,connections)
+    lgraph = layerGraph();
+    for i = 1:numel(layers)
+        lgraph = addLayers(lgraph,layers(i));
+    end
+    
+    for c = 1:size(connections,1)
+        lgraph = connectLayers(lgraph,connections.Source{c},connections.Destination{c});
+    end
+end
