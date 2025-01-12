@@ -1,0 +1,427 @@
+clc;
+clear all;
+close all;
+
+% setting the directory path
+directory_path = 'C:\Users\gurpu\Desktop\Capstone\dataset ct\COVID19 infection\COVID-CTset part2\COVID-CTst part2\NORMAL\normal4'; 
+
+% get the content from the directory
+contents = dir(directory_path); 
+
+% empty array for storing folder names
+folder_names = {}; 
+
+for i = 1:numel(contents)
+    % Check if the item is a directory and not '.' or '..'
+    if contents(i).isdir && ~strcmp(contents(i).name, '.') && ~strcmp(contents(i).name, '..')
+        % Add the folder name to the cell array
+        folder_names = [folder_names, contents(i).name];
+        folder_names
+    end
+end
+
+% for loop for automation
+for j=1:numel(folder_names) 
+
+    fldr=folder_names{j};
+
+    % set the initial path once
+    imagePath1='C:\Users\gurpu\Desktop\Capstone\dataset ct\COVID19 infection\COVID-CTset part2\COVID-CTst part2\NORMAL\normal4';
+    % folder name in each iteration is changed
+    imagePath2=fldr;
+    imagePath3='+';
+    slash='/';
+    % changing the name of the image in each iteration
+    imagePath=append(imagePath1,slash,imagePath2); 
+    c=dir(imagePath);
+    iPath=imagePath;
+    disp('check 1 -OK');
+    str = fldr;
+   
+    % extracting only numerical part
+    numbers = regexp(str, '\d+', 'match'); 
+
+    if ~isempty(numbers)
+        % convert the cell array of strings to a numerical array
+        numeric_part = str2double(numbers{1});
+        numbers{1}=int2str(numeric_part);
+    end
+    savedPathCropped1='C:/Users/gurpu/Desktop/Capstone/dataset ct/input dataset/';
+    savedPathCropped2='automated covid infection'; %'COVID Pneumonia' 'COVID infection' 'Normal' 'Normal - COVID'
+    savedPathCropped3=numbers{1};
+
+    % final save path is initialized for particular iteration
+    savedPathCropped=append(savedPathCropped1,savedPathCropped2,slash,savedPathCropped3); 
+    
+    imagePath=iPath;
+    
+    % find the number of images of type .tif in particular folder
+    fldr = imagePath;
+    a = dir(fullfile(fldr, '*.tif'));
+    n = numel(a);
+
+    % automation of enhancing images per patient
+    for i=1:n 
+        cnt = i;
+        if (i<10)
+            chr = 'IM0000';
+        else
+            chr = 'IM000';
+        end
+        chr1  = int2str(cnt);
+        chr2 = '.png';
+        chr3='.tif';
+
+        % append the image
+        imgname = append(chr,chr1,chr3); 
+        imgSaveName=append(chr,chr1,chr3);
+        pa = imagePath;
+        slash='/';
+        path = append(pa,slash,imgname);
+
+        % final image name
+        imgname = append('/',imgname); 
+
+        % path name is changed accordingly 
+        path1 = append(imagePath,slash,'normalized');
+        mkdir(path1);
+
+        % final path for saving enhanced images
+        finalPath = append(path1,slash,imgSaveName); 
+
+        save_path = finalPath;
+
+        % read the image
+        arr = imread(path); 
+
+        % normalizing the image; convert to double and normalize the values
+        nrmlzd = double(arr) / double(max(arr(:))); % 
+
+        % convert new image to datatype uint16
+        visualizable_image = uint16(nrmlzd * (2^16 - 1)); 
+
+        visualizable_image=uint16(visualizable_image);
+       
+        % saving the image
+        imwrite(visualizable_image, save_path); 
+
+    end
+    disp('check 2 -OK');
+
+    %% Delete pre-existing images
+    % deleting all the pre-existing folders with the same name in the sub-folder
+    path=append(imagePath,'/pre-processed images');
+    path2=append(imagePath,'/selected images');
+    path3=append(imagePath,'/binarized');
+    path4=append(imagePath,'/median filtered');
+    path5=append(imagePath,'/select images');
+    
+    if(exist(path, 'dir')==7)
+        rmdir(path, 's');
+    end
+    if(exist(path2, 'dir')==7)
+        rmdir(path2, 's');
+    end
+    if(exist(path3, 'dir')==7)
+        rmdir(path3, 's');
+    end
+    if(exist(path4, 'dir')==7)
+        rmdir(path4, 's');
+    end
+    if(exist(path5, 'dir')==7)
+    rmdir(path5, 's');
+    end
+
+    disp('check 3 -OK');
+    %% Select images using ROI
+    
+    % again, assiging N with the number of images that the folder has
+    a = dir(fullfile(imagePath, '*.tif')); %png
+    N = numel(a);
+    
+    roiPath=append(imagePath,'/selected images');
+    % Create directory 'selected_TIF'
+    if ~exist(roiPath, 'dir')
+        mkdir(roiPath);
+    end
+    adds = containers.Map;
+    
+    % Walk through the directory structure
+    % retrives a list of all .tif files in the folder
+    files = dir(fullfile(imagePath, '**', '*.tif')); % png 
+    for i = 1:length(files) 
+        file = files(i);
+        full_add = fullfile(file.folder, file.name);
+        % constructs the path of the file
+        indexes = find_inds(filesep, full_add); 
+        % finds the last occurance of the file seperator
+        index = indexes(end); 
+        % extracts the key
+        key = full_add(1:index); 
+    
+        % adds key to map, if it doesnt exist
+        if ~isKey(adds, key) 
+            adds(key) = {};
+        end
+        % appends the file name to the list in the map
+        adds(key) = [adds(key), {full_add(index+1:end)}]; 
+    end
+    disp('check 4 -OK');
+
+    selected = containers.Map;
+    for key = keys(adds)
+        key = key{1};
+        zero = [];
+        names = [];
+        for value = adds(key)
+            value = value{1};
+            names = [names, {value}];
+            address = fullfile(key, value);
+            pixel = imread(address, 'tif'); %png
+            sp = pixel(241:340, 121:370);
+                    % sp = pixel(100:370, 80:430);
+                    % counted_zero = sum(sp(:) < 90 & sp(:) > 60); 
+            % counts the number of pixels with <300 intensity in 'sp' specifically
+            counted_zero = sum(sp(:) < 200);
+            zero = [zero, counted_zero];
+           
+        end
+        min_zero = min(zero);
+        max_zero = max(zero);
+        % calcs the threshold val using min and max counts of low int. pixels
+        threshold = (max_zero - min_zero) / 1.5; 
+        indices = find(zero > threshold);
+        selected_names = names(indices); 
+        % stores the selected items in the 'selected' variable
+        selected(key) = selected_names; 
+    end
+    
+    for key = keys(selected)
+        key = key{1};
+        indexes = find_inds(filesep, key);
+        for i = 1:4
+            eval(sprintf('index%d = indexes(i);', i));
+        end
+     
+    
+        for value = selected(key)
+            value = value{1};
+            address = fullfile(key, value);
+            [~, relative_path, ~] = fileparts(address);
+            new_address = fullfile(roiPath, relative_path);
+            suffix = '.tif';
+            new_address = append(new_address,suffix);
+            % copies the images and pastes it in a new address
+            copyfile(address, new_address); 
+            address;
+        end
+    end
+    disp('check 5 -OK');
+    saved_path=roiPath;
+    for i=0:9
+        imgname1='000';
+        num=int2str(i);
+        slash='/';
+        suffix='.tif';
+        imgname=append(saved_path,slash,imgname1,num,suffix);
+        delete(imgname);
+    end
+    
+    % Specify the folder containing your images
+    folderPath = append(imagePath,'/selected images');
+    folderPath1=append(imagePath,'/select images');
+    mkdir(folderPath1);
+
+    % Get a list of all image files in the folder
+    imageFiles = dir(fullfile(folderPath, '*tif'));
+    
+    % Loop through each image and rename them
+    for i = 1:length(imageFiles)
+        % Construct the new filename based on the count
+        newFilename = sprintf('1 (%d).tif', i);
+    
+        % Build the full path for the old and new filenames
+        oldFilePath = fullfile(folderPath, imageFiles(i).name);
+        newFilePath = fullfile(folderPath1, newFilename);
+    
+        % Rename the file
+        movefile(oldFilePath, newFilePath);
+    
+    end
+    
+    disp('check 6 -OK');
+    %% Laplacian and Sharpening of images (preprocessing)
+    % image folder
+    path=append(imagePath,'/select images'); 
+    % image save folder
+    savedPath=append(imagePath,'/pre-processed images');
+    mkdir(savedPath);
+    
+    
+    a = dir(fullfile(path, '*.tif'));
+    N = numel(a);
+    
+    % for loop for automation
+    for i=1:N 
+        imgname = '/1 (';
+        num = int2str(i);
+        suffix=').tif';
+        imgpath =append(path,imgname,num,suffix);
+        
+        % reading the image
+        img = imread(imgpath); 
+        
+        J = img;
+        J=im2gray(img);
+        [m n] = size(J);
+        % J=imresize();
+        b = zeros(m+2,n+2);
+        b(2:m+1,2:n+1)=J;
+        c=zeros(m,n);
+        
+        % applying the laplace filter
+        % f3 is a laplace matrix
+        f3=[0 -1 0;-1 4 -1; 0 -1 0];
+        for k=2:m-1
+            for l=2:n-1
+                e(k,l)=(f3(1,1)*b(k-1,l-1)+f3(1,2)*b(k-1,l)+f3(1,3)*b(k-1,l+1)+f3(2,1)*b(k,l-1)+f3(2,2)*b(k,l)+f3(2,3)*b(k,l+1)+f3(3,1)*b(k+1,l-1)+f3(3,2)*b(k+1,l)+f3(3,3)*b(k+1,l+1));
+            end
+        end
+        
+        % converting 'e' to a uint16 image
+        e=uint16(e); % uint16 -> 0:65535
+        % resizing the image to 512x512 
+        e = imresize(e,[512 512]);
+        
+        % sharpened image 
+        % adding laplacian filtered image and the original image will give the sharpened image
+        sharpImg = J+e;
+        
+        % saving the image 
+        save_path = append(savedPath,imgname,num,suffix);
+        % saving the image
+        imwrite(sharpImg, save_path);     
+    end
+    disp('check 7 -OK');
+
+    %% Median filtering and binarize (feature extraction)
+    % initializing the variables with the image file paths
+    path=append(imagePath,'/pre-processed images');
+    % initializing the savepath
+    savePath=append(imagePath,'/median filtered');
+    savePath2=append(imagePath,'/binarized');
+    % creating path if not already created
+    mkdir(savePath);
+    mkdir(savePath2);
+    
+    
+    a = dir(fullfile(path, '*.tif'));
+    N = numel(a);
+
+    for i=1:N
+        imageName1='/1 (';
+        imageName2=int2str(i);
+        imageName3=').tif';
+        imageName=append(imageName1,imageName2,imageName3);
+        imagePathName=append(path,imageName);
+    
+        image=imread(imagePathName);
+        % applying the median filter to the image
+        medianFilteredImage=medfilt2(image);
+    
+        % converting the image to a binary image
+        binaryImage=imbinarize(medianFilteredImage,'global');
+        % imshow(binaryImage);
+    
+        % save path for median filtered image
+        finalSavePath=append(savePath,imageName);
+        imwrite(medianFilteredImage,finalSavePath);
+    
+        % save path for binarzed image
+        finalSavePathBinarize=append(savePath2, imageName);
+        imwrite(binaryImage, finalSavePathBinarize);
+    end
+    
+    %% Automated cropping using edge detection, dilation, filling and boundary box for detection
+
+    % initializing the variables with the image file paths
+    path=append(imagePath,'/binarized');
+    path1=append(imagePath,'/median filtered');
+    mkdir(savedPathCropped)
+    
+    a = dir(fullfile(path, '*.tif'));
+    N = numel(a);
+    
+    for i=1:N
+        imgname = '1 (';
+        num = int2str(i);
+        suffix=').tif';
+        s = '/';
+
+        imagepath = append(path,s,imgname,num,suffix);
+        imgPath1=append(path1,s,imgname,num,suffix);
+        originalImage = imread(imagepath); %Read the image
+        imgToCrop=imread(imgPath1);
+        % grayImage = im2gray(originalImage); % Convert the image to grayscale 
+        % keeping gray image the same as original image
+        grayImage=originalImage;
+    
+        % keeping the smoothed image the same as the original image
+        smoothedImage = grayImage; 
+        % converting the image to double for further processing
+        smoothedImage=double(smoothedImage);
+        % smoothing the image using a gaussian filter
+        smoothedImage=imgaussfilt(smoothedImage,7);
+    
+        % use edge detection 'sobel' method - find lung's edges
+        edgeImage = edge(smoothedImage, 'sobel'); 
+        
+        % dilate the edges
+        se = strel('cuboid', [100 100 100]); 
+   
+        % fill the holes in the lung region
+        filledImage=imclose(edgeImage, se);
+     
+        % find the connected components in the image
+        cc = bwconncomp(filledImage); 
+        
+        % find the largest connected component (lung region)
+        numPixels = cellfun(@numel, cc.PixelIdxList);
+        [~, idx] = max(numPixels);
+        largestComponent = false(size(filledImage));
+        largestComponent(cc.PixelIdxList{idx}) = true;
+   
+        % crop the original image using the bounding box of the lung region
+        props = regionprops(largestComponent, 'BoundingBox');
+        boundingBox = props.BoundingBox;
+        croppedImage = imcrop(imgToCrop, boundingBox);
+    
+        [m n] = size(croppedImage);
+        
+        [rows, cols, ~] = size(originalImage);
+        
+        % resize the image to 310x420 for uniformity
+        cropImg = imresize(croppedImage, [310 420]);
+    
+        % create the save path according to the particular image's name
+        save_path = append(savedPathCropped,s,imgname,num,suffix);
+        % save the image
+        imwrite(cropImg, save_path); 
+    end
+    disp('check 8 -OK');
+end
+
+%% Define the find_inds function
+function indexes = find_inds(ch, st)
+    indexes = [];
+    num = 0;
+    while true
+        index0 = strfind(st(num+1:end), ch);
+        if ~isempty(index0)
+            indexes = [indexes, index0(1) + num];
+            num = num + index0(1);
+        else
+            break;
+        end
+    end
+end
