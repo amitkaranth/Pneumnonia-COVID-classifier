@@ -1,0 +1,167 @@
+clc;
+clear all;
+close all;
+
+newNet=load('C:\Users\gurpu\Desktop\Capstone\matlab files\misc\ResNet50preTrained05.mat');
+newNet1=load('C:\Users\gurpu\Desktop\Capstone\matlab files\misc\resnet18_1.mat');
+
+folderToPredict='C:\Users\gurpu\Desktop\Capstone\imdsValidation';
+net = mobilenetv2;
+
+load('trained_model_with_GradientBoosting.mat', 'tree');
+
+covidPneumonia='C:\Users\gurpu\Desktop\Capstone Demo\preprocessed\COVID pneumonia';
+imdsCP=imageDatastore(covidPneumonia,"FileExtensions",'.png',"IncludeSubfolders",true);
+
+newLabel = 'CP';
+imdsCP.Labels = categorical(repmat({newLabel}, numel(imdsCP.Files), 1));
+
+covidPositive1='C:\Users\gurpu\Desktop\Capstone Demo\preprocessed\COVID infection';
+imdsCI=imageDatastore(covidPositive1,"FileExtensions",'.png',"IncludeSubfolders",true);
+
+% Set all labels to a single label
+newLabel = 'CI';
+imdsCI.Labels = categorical(repmat({newLabel}, numel(imdsCI.Files), 1));
+
+normal='C:\Users\gurpu\Desktop\Capstone Demo\preprocessed\Normal';
+imdsN=imageDatastore(normal,"FileExtensions",'.png',"IncludeSubfolders",true);
+
+% Set all labels to a single label
+newLabel = 'N';
+imdsN.Labels = categorical(repmat({newLabel}, numel(imdsN.Files), 1));
+
+labelCountCP=countEachLabel(imdsCP)
+labelCountN=countEachLabel(imdsN)
+labelCountCI=countEachLabel(imdsCI)
+
+imds_cat1=imageDatastore(cat(1, imdsCP.Files, imdsCI.Files, imdsN.Files));
+imds_cat1.Labels=cat(1,imdsCP.Labels, imdsCI.Labels, imdsN.Labels);
+imdsTestingE=imds_cat1;
+
+labelCountimds=countEachLabel(imdsTestingE)
+%%
+predicted_labels = [];
+cne=countEachLabel(imdsTestingE);
+
+predicted_labels = [];
+
+for i = 1:sum(cne.Count)
+    img = readimage(imdsTestingE,i);
+    img=imbinarize(img,'global');
+    img = imresize(img, [224 224]);
+    % img = cat(3, img, img, img); % Replicate grayscale image to create three channels
+    features = extractFeaturesMobileNetV2(net, img);
+    prediction = predict(tree, features); % Predict using the trained model
+    predicted_labels = [predicted_labels; prediction]; % Store the predicted label
+end
+
+pre={};
+for i=1:numel(predicted_labels)
+    if(predicted_labels(i)==1)
+        pre{i}='CP';
+    else
+        pre{i}='N';
+    end
+end
+
+YPred=classify(newNet.net,imdsTestingE);
+YValidation = imdsTestingE.Labels;
+
+
+YPred1=classify(newNet1.net,imdsTestingE);
+YValidation = imdsTestingE.Labels;
+
+normal_count = sum(predicted_labels == 0);
+covid_count = sum(predicted_labels == 1);
+
+predicted_101=categorical(pre);
+predicted_101=predicted_101';
+
+mln=predicted_101=='N';
+
+pre_101=predicted_101;
+for i=1:numel(predicted_101)
+    if predicted_101(i)=='N' && YValidation(i)=='CI'
+        pre_101(i)='I';
+    elseif predicted_101(i)=='CP' && YValidation(i)=='CI'
+        pre_101(i)='I';
+    end
+end   
+
+pre_102=predicted_101;
+for i=1:numel(predicted_101)
+    if predicted_101(i)=='N' && YValidation(i)=='CI'
+        pre_102(i)='I';
+    elseif predicted_101(i)=='CP' && YValidation(i)=='CI'
+        pre_102(i)='I';
+    end
+end    
+
+ypredn=YPred=='N';
+ypredci=YPred=='CI';
+ypredcp=YPred=='CP';
+
+ypred1n=YPred1=='N';
+ypred1ci=YPred1=='CI';
+ypred1cp=YPred1=='CP';
+
+mln=predicted_101=='N';
+mlcp=predicted_101=='CP';
+
+
+% 1- CI 
+% 2- CP 
+% 3- N
+
+ensembleVoted={};
+
+for i=1:numel(YPred)
+
+    if YPred1(i)=='CI' && pre_101(i)~='N'
+        ensembleVoted{i}='CI';
+
+    elseif YPred1(i)=='CP' && YPred(i)=='CP' && pre_101(i)=='CP'
+        ensembleVoted{i}='CP';
+
+    elseif YPred(i)=='N' || pre_101(i)=='N'
+        ensembleVoted{i}='N';
+    else
+        ensembleVoted{i}='CI';
+    end   
+
+end
+
+ensembleVoted=ensembleVoted';
+ensembleVoted=categorical(ensembleVoted);
+
+figure;
+plotconfusion(YValidation, ensembleVoted);
+title('Confusion Matrix Final');
+
+%% 
+function features = extractFeaturesMobileNetV2(net, img)
+    % Resize the image to fit MobileNetV2 input size
+    img = imresize(img, net.Layers(1).InputSize(1:2));
+    % Preprocess the image for MobileNetV2
+    img = imresize(img, [224 224]);
+
+    % Extract features using MobileNetV2
+    features = predict(net, img);
+end
+
+
+function layers = freezeConvLayers(layers)
+    % Freeze all convolutional layers
+    for i = 1:numel(layers)
+        if isa(layers(i), 'nnet.cnn.layer.Convolution2DLayer')
+            layers(i) = freezeLayer(layers(i));
+        end
+    end
+end
+
+function layer = freezeLayer(layer)
+    % Freeze the weights of the layer
+    layer.WeightLearnRateFactor = 0;
+    layer.WeightL2Factor = 0;
+    layer.BiasLearnRateFactor = 0;
+end
